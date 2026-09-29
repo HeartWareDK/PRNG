@@ -30,19 +30,24 @@ a full monetary refund of the price you paid for it.
 
 # HeartWare.PRNG
 
-`HeartWare.PRNG` is a small Delphi utility UNIT providing fast, deterministic
-32-bit and 64-bit pseudo-random number generators with explicit seed state.
+`HeartWare.PRNG` is a small Delphi utility UNIT providing fast,
+deterministic 32-bit and 64-bit pseudo-random number generators.
 
-The UNIT contains two independent generators:
+The UNIT provides two ways of using each generator:
 
-- a 64-bit generator using SplitMix64;
-- a 32-bit generator using a SplitMix-style 32-bit generator.
+- independent RECORD-based generators, suitable for maintaining separate
+  PRNG state in different objects, routines, or threads;
+- stand-alone global functions compatible with the traditional
+  `RANDOMIZE`/`RANDOM` style of use.
 
-Both generators provide:
+The 64-bit implementation uses SplitMix64. The 32-bit implementation uses
+the corresponding 32-bit SplitMix-style generator.
 
-- an externally visible seed/state variable;
+Both implementations support:
+
 - automatic seeding from a newly generated `TGUID`;
 - explicit deterministic seeding;
+- externally accessible generator state;
 - generation of values in the range `0..Range-1`;
 - generation of values in an inclusive `Min..Max` range;
 - rejection sampling to avoid modulo bias.
@@ -54,108 +59,299 @@ are desirable.
 They are **not cryptographically secure** and must not be used where
 unpredictability against an attacker is required.
 
-## Interface
+## 64-bit interface
+
+The 64-bit interface consists of the `TPRNG64` RECORD and the global
+64-bit generator functions:
 
 ```pascal
+TYPE
+  TPRNG64       = RECORD
+                  PRIVATE
+                    FSeed       : UInt64;
+                    FUNCTION    NextRandom : UInt64;
+                  PUBLIC
+                    CLASS FUNCTION Create : TPRNG64; OVERLOAD; STATIC;
+                    CLASS FUNCTION Create(Seed : UInt64) : TPRNG64; OVERLOAD; STATIC;
+                    FUNCTION    RANDOM(Range : UInt64) : UInt64;
+                    FUNCTION    RND(Min,Max : UInt64) : UInt64;
+                    PROCEDURE   RANDOMIZE; OVERLOAD;
+                    PROCEDURE   RANDOMIZE(Seed : UInt64); OVERLOAD;
+                    PROPERTY    Seed : UInt64 READ FSeed WRITE FSeed;
+                  END;
+
 VAR
   RandSeed64 : UInt64 = 0;
-  RandSeed32 : UInt32 = 0;
 
 PROCEDURE RANDOMIZE64; OVERLOAD;
 PROCEDURE RANDOMIZE64(Seed : UInt64); OVERLOAD;
 FUNCTION RANDOM64(Range : UInt64) : UInt64;
 FUNCTION RND64(Min,Max : UInt64) : UInt64;
-
-PROCEDURE RANDOMIZE32; OVERLOAD;
-PROCEDURE RANDOMIZE32(Seed : UInt32); OVERLOAD;
-FUNCTION RANDOM32(Range : UInt32) : UInt32;
-FUNCTION RND32(Min,Max : UInt32) : UInt32;
 ```
 
-The 32-bit and 64-bit generators are completely independent. Calling a
-32-bit function changes only `RandSeed32`; calling a 64-bit function changes
-only `RandSeed64`.
+The RECORD-based and global interfaces use the same underlying PRNG
+implementation. The difference is where the generator state is stored.
 
-## 64-bit generator
+A `TPRNG64` instance stores its state in its own private `FSeed` field,
+exposed through the public `Seed` property.
 
-### `RandSeed64`
+The global functions store their state in the global `RandSeed64`
+variable.
 
-```pascal
-VAR
-  RandSeed64 : UInt64;
-```
+## `TPRNG64`
 
-`RandSeed64` contains the complete state of the 64-bit generator.
+`TPRNG64` represents an independent 64-bit pseudo-random number generator.
 
-Because the state is publicly accessible, it may also be saved and restored
-when reproducible sequences are required.
+Each RECORD instance maintains its own state, allowing multiple unrelated
+random sequences to exist at the same time.
 
 For example:
 
 ```pascal
 VAR
-  SavedSeed : UInt64;
+  RNG1,RNG2 : TPRNG64;
 
-SavedSeed:=RandSeed64;
+RNG1:=TPRNG64.Create;
+RNG2:=TPRNG64.Create;
 
-// Generate some values...
-
-RandSeed64:=SavedSeed;
+A:=RNG1.RANDOM(1000);
+B:=RNG2.RANDOM(1000);
 ```
 
-Restoring the seed restores the generator to exactly the same point in the
-sequence.
+`RNG1` and `RNG2` are completely independent.
 
-All `UInt64` values, including zero, are valid states.
-
-### `RANDOMIZE64`
+### `TPRNG64.Create`
 
 ```pascal
-PROCEDURE RANDOMIZE64;
+CLASS FUNCTION Create : TPRNG64;
 ```
 
-Initializes the 64-bit generator from a newly created `TGUID`.
-
-The GUID contains 128 bits. The implementation treats those bits as two
-`UInt64` values and folds them into the 64-bit generator state using XOR:
-
-```pascal
-RANDOMIZE64(Parts[0] XOR Parts[1]);
-```
-
-This is intended as a convenient way of obtaining a fresh starting state.
-It does not make the generator cryptographically secure.
-
-### `RANDOMIZE64(Seed)`
-
-```pascal
-PROCEDURE RANDOMIZE64(Seed : UInt64);
-```
-
-Explicitly initializes the 64-bit generator:
-
-```pascal
-RandSeed64:=Seed;
-```
-
-Using the same seed produces the same sequence of pseudo-random values. This
-is useful for repeatable tests, simulations, procedural generation, and
-debugging.
+Creates a new generator and initializes its seed from a newly created
+`TGUID`.
 
 Example:
 
 ```pascal
-RANDOMIZE64(123456789);
+VAR
+  RNG : TPRNG64;
 
-A:=RANDOM64(1000);
-B:=RANDOM64(1000);
-C:=RANDOM64(1000);
+RNG:=TPRNG64.Create;
 ```
 
-Repeating the same initialization produces the same values for `A`, `B`,
-and `C`.
+The GUID contains 128 bits. The implementation treats those bits as two
+`UInt64` values and folds them into a 64-bit state using XOR.
 
-### SplitMix64
+This is intended as a convenient way of obtaining a fresh initial state.
+It does not make the generator cryptographically secure.
+
+### `TPRNG64.Create(Seed)`
+
+```pascal
+CLASS FUNCTION Create(Seed : UInt64) : TPRNG64;
+```
+
+Creates a generator with an explicitly supplied seed.
+
+Example:
+
+```pascal
+RNG:=TPRNG64.Create($123456789ABCDEF0);
+```
+
+Using the same seed always produces the same pseudo-random sequence.
+
+This is useful for:
+
+- repeatable tests;
+- simulations;
+- procedural generation;
+- debugging;
+- saving and replaying deterministic sequences.
+
+All `UInt64` values, including zero, are valid seeds.
+
+## `TPRNG64.Seed`
+
+```pascal
+PROPERTY Seed : UInt64 READ FSeed WRITE FSeed;
+```
+
+The `Seed` property exposes the complete current state of the generator.
+
+The value may be read to save the current generator position:
+
+```pascal
+SavedSeed:=RNG.Seed;
+```
+
+and written later to restore that exact position:
+
+```pascal
+RNG.Seed:=SavedSeed;
+```
+
+The sequence produced after restoring the seed will be identical to the
+sequence that originally followed that state.
+
+The property may also be used directly to assign a new deterministic seed:
+
+```pascal
+RNG.Seed:=$0123456789ABCDEF;
+```
+
+This is equivalent to calling:
+
+```pascal
+RNG.RANDOMIZE($0123456789ABCDEF);
+```
+
+## `TPRNG64.RANDOMIZE`
+
+```pascal
+PROCEDURE RANDOMIZE;
+```
+
+Re-initializes the generator from a newly created `TGUID`.
+
+Example:
+
+```pascal
+RNG.RANDOMIZE;
+```
+
+The existing sequence is discarded and a new seed is installed.
+
+## `TPRNG64.RANDOMIZE(Seed)`
+
+```pascal
+PROCEDURE RANDOMIZE(Seed : UInt64);
+```
+
+Re-initializes the generator with a specific seed:
+
+```pascal
+RNG.RANDOMIZE($123456789ABCDEF0);
+```
+
+This is useful when a previously known sequence must be reproduced.
+
+## `TPRNG64.RANDOM`
+
+```pascal
+FUNCTION RANDOM(Range : UInt64) : UInt64;
+```
+
+Returns a pseudo-random value in:
+
+```text
+0 .. Range-1
+```
+
+For example:
+
+```pascal
+X:=RNG.RANDOM(10);
+```
+
+returns a value from 0 through 9.
+
+`Range` must be greater than zero.
+
+Passing zero raises `ERangeError`.
+
+### Avoiding modulo bias
+
+A simple implementation such as:
+
+```pascal
+NextRandom MOD Range
+```
+
+would introduce a small statistical bias whenever `Range` is not an exact
+divisor of `2^64`.
+
+`HeartWare.PRNG` avoids this by using rejection sampling.
+
+The implementation calculates:
+
+```pascal
+Threshold:=(UInt64(0)-Range) MOD Range;
+```
+
+The unsigned subtraction deliberately wraps around, allowing the remainder
+of `2^64` divided by `Range` to be determined without requiring an integer
+type wider than 64 bits.
+
+Raw values below `Threshold` are discarded.
+
+The remaining number of possible source values is therefore an exact
+multiple of `Range`, making the final:
+
+```pascal
+R MOD Range
+```
+
+unbiased.
+
+## `TPRNG64.RND`
+
+```pascal
+FUNCTION RND(Min,Max : UInt64) : UInt64;
+```
+
+Returns a pseudo-random value in the inclusive range:
+
+```text
+Min .. Max
+```
+
+For example:
+
+```pascal
+Die:=RNG.RND(1,6);
+```
+
+returns a value from 1 through 6.
+
+If `Max` is smaller than `Min`, `ERangeError` is raised.
+
+The range width is calculated as:
+
+```pascal
+Range:=SUCC(Max-Min);
+```
+
+and the normal case is equivalent to:
+
+```pascal
+Result:=Min+RANDOM(Range);
+```
+
+### Complete UInt64 range
+
+The expression:
+
+```pascal
+SUCC(High(UInt64))
+```
+
+wraps to zero.
+
+Consequently:
+
+```pascal
+RNG.RND(0,High(UInt64))
+```
+
+requires special handling.
+
+In this case a calculated range of zero represents the complete `UInt64`
+domain rather than an empty range.
+
+The implementation therefore returns the raw PRNG result directly, allowing
+every possible `UInt64` value to be returned.
+
+## SplitMix64 implementation
 
 The internal 64-bit generator advances its state by adding the fixed Weyl
 increment:
@@ -169,9 +365,65 @@ The resulting state is then passed through the SplitMix64 mixing function.
 The state transition visits every possible 64-bit state before repeating,
 giving the generator a period of `2^64`.
 
-The internal raw generator is intentionally kept in the implementation
-section as `NextRandom64`; callers normally use `RANDOM64` or `RND64`
-instead.
+The low-level implementation is hidden inside the UNIT implementation
+section and operates on a seed passed by reference:
+
+```pascal
+FUNCTION PRNG64Next(VAR Seed : UInt64) : UInt64;
+FUNCTION PRNG64Random(VAR Seed : UInt64; Range : UInt64) : UInt64;
+FUNCTION PRNG64Rnd(VAR Seed : UInt64; Min,Max : UInt64) : UInt64;
+PROCEDURE PRNG64Randomize(VAR Seed : UInt64);
+```
+
+Both the `TPRNG64` methods and the global 64-bit functions call these same
+internal routines.
+
+This ensures that both interfaces produce identical results when operating
+from the same seed.
+
+## Global 64-bit generator
+
+For applications that do not require independent generator instances, the
+UNIT also provides a traditional global interface.
+
+The global generator state is stored in:
+
+```pascal
+VAR
+  RandSeed64 : UInt64;
+```
+
+### `RANDOMIZE64`
+
+```pascal
+PROCEDURE RANDOMIZE64;
+```
+
+Initializes `RandSeed64` from a newly created `TGUID`.
+
+Example:
+
+```pascal
+RANDOMIZE64;
+```
+
+### `RANDOMIZE64(Seed)`
+
+```pascal
+PROCEDURE RANDOMIZE64(Seed : UInt64);
+```
+
+Explicitly sets the global generator state:
+
+```pascal
+RANDOMIZE64($123456789ABCDEF0);
+```
+
+This is equivalent to assigning:
+
+```pascal
+RandSeed64:=$123456789ABCDEF0;
+```
 
 ### `RANDOM64`
 
@@ -185,48 +437,18 @@ Returns a pseudo-random value in:
 0 .. Range-1
 ```
 
-For example:
+and advances `RandSeed64`.
+
+It uses the same rejection-sampling implementation as
+`TPRNG64.RANDOM`.
+
+Example:
 
 ```pascal
-X:=RANDOM64(10);
+X:=RANDOM64(100);
 ```
 
-returns a value from 0 through 9.
-
-`Range` must be greater than zero. Passing zero raises `ERangeError`.
-
-#### Avoiding modulo bias
-
-A simple implementation such as:
-
-```pascal
-NextRandom64 MOD Range
-```
-
-would produce a small statistical bias whenever `Range` is not an exact
-divisor of `2^64`.
-
-`HeartWare.PRNG` avoids this by using rejection sampling.
-
-It calculates:
-
-```pascal
-Threshold:=(UInt64(0)-Range) MOD Range;
-```
-
-The unsigned subtraction deliberately wraps around, effectively allowing
-the remainder of `2^64` divided by `Range` to be determined without needing
-an integer type wider than 64 bits.
-
-Raw random values below `Threshold` are discarded. The remaining number of
-possible input values is therefore an exact multiple of `Range`, making the
-final:
-
-```pascal
-R MOD Range
-```
-
-unbiased.
+returns a value from 0 through 99.
 
 ### `RND64`
 
@@ -240,219 +462,111 @@ Returns a pseudo-random value in the inclusive range:
 Min .. Max
 ```
 
+and advances `RandSeed64`.
+
+It uses the same implementation and edge-case handling as `TPRNG64.RND`.
+
+Example:
+
+```pascal
+Die:=RND64(1,6);
+```
+
+## RECORD versus global interface
+
+The two 64-bit interfaces are functionally equivalent.
+
 For example:
 
 ```pascal
-Die:=RND64(1,6);
+RandSeed64:=$123456789ABCDEF0;
+RNG:=TPRNG64.Create($123456789ABCDEF0);
+
+A:=RANDOM64(1000000);
+B:=RNG.RANDOM(1000000);
 ```
 
-returns a value from 1 through 6.
+`A` and `B` will be identical because both calls operate on the same
+underlying algorithm from the same initial state.
 
-If `Max` is smaller than `Min`, `ERangeError` is raised.
+The difference is state ownership.
 
-The range width is calculated as:
+The global interface stores one shared state:
 
 ```pascal
-Range:=SUCC(Max-Min);
+RandSeed64
 ```
 
-and the normal case is then implemented as:
+while every `TPRNG64` value stores its own private state.
+
+This makes the RECORD form preferable whenever multiple independent random
+sequences are required.
+
+## Thread safety
+
+The global functions are **not thread-safe** when multiple threads access
+the same global state concurrently.
+
+For example, concurrent calls to:
 
 ```pascal
-Result:=Min+RANDOM64(Range);
+RANDOM64(...)
 ```
 
-#### Complete UInt64 range
+all modify `RandSeed64`.
 
-The expression:
+Applications that use the global interface from multiple threads must
+serialize access themselves.
 
-```pascal
-SUCC(High(UInt64))
-```
-
-wraps to zero.
-
-Consequently:
+`TPRNG64` provides a simple thread-safe alternative when each thread owns
+its own RECORD instance:
 
 ```pascal
-RND64(0,High(UInt64))
-```
-
-requires special handling. A calculated range of zero represents the entire
-`UInt64` domain rather than an empty range.
-
-In that case `RND64` returns the raw `NextRandom64` result directly.
-
-This permits every possible `UInt64` value to be returned.
-
-## 32-bit generator
-
-The 32-bit API mirrors the 64-bit API.
-
-### `RandSeed32`
-
-```pascal
+PROCEDURE Worker;
 VAR
-  RandSeed32 : UInt32;
+  RNG : TPRNG64;
+BEGIN
+  RNG:=TPRNG64.Create;
+
+  // This thread now has its own independent PRNG state.
+END;
 ```
 
-Contains the complete state of the 32-bit generator.
+No shared mutable generator state is involved.
 
-All `UInt32` values, including zero, are valid states.
+A `TPRNG64` instance is not inherently safe if the **same instance** is
+shared and modified concurrently by multiple threads. In that situation,
+normal synchronization is still required.
 
-As with `RandSeed64`, saving and restoring this value saves and restores the
-exact position in the pseudo-random sequence.
+The intended thread-safe usage is therefore one PRNG instance per thread,
+task, object, or other independent execution context.
 
-### `RANDOMIZE32`
+## Saving and restoring generator state
+
+Both interfaces allow the complete PRNG state to be saved and restored.
+
+For a RECORD:
 
 ```pascal
-PROCEDURE RANDOMIZE32;
+SavedSeed:=RNG.Seed;
+
+// Generate values...
+
+RNG.Seed:=SavedSeed;
 ```
 
-Creates a new `TGUID`, treats its 128 bits as four `UInt32` values, and folds
-them into a single 32-bit state using XOR:
+For the global interface:
 
 ```pascal
-RANDOMIZE32(Parts[0] XOR Parts[1] XOR Parts[2] XOR Parts[3]);
+SavedSeed:=RandSeed64;
+
+// Generate values...
+
+RandSeed64:=SavedSeed;
 ```
 
-### `RANDOMIZE32(Seed)`
-
-```pascal
-PROCEDURE RANDOMIZE32(Seed : UInt32);
-```
-
-Explicitly initializes the 32-bit state:
-
-```pascal
-RandSeed32:=Seed;
-```
-
-The same seed always produces the same pseudo-random sequence.
-
-### 32-bit SplitMix-style generator
-
-The internal 32-bit generator advances the state by:
-
-```pascal
-$9E3779B9
-```
-
-and applies a sequence of XOR-shifts and multiplications to mix the bits.
-
-The odd state increment causes every possible 32-bit state to be visited
-before the state repeats, giving a period of `2^32`.
-
-The internal raw generator is `NextRandom32` and is not exported through the
-UNIT interface.
-
-### `RANDOM32`
-
-```pascal
-FUNCTION RANDOM32(Range : UInt32) : UInt32;
-```
-
-Returns a pseudo-random value in:
-
-```text
-0 .. Range-1
-```
-
-`Range` must be greater than zero. Passing zero raises `ERangeError`.
-
-As with `RANDOM64`, rejection sampling is used to avoid modulo bias:
-
-```pascal
-Threshold:=(UInt32(0)-Range) MOD Range;
-```
-
-### `RND32`
-
-```pascal
-FUNCTION RND32(Min,Max : UInt32) : UInt32;
-```
-
-Returns a pseudo-random value in the inclusive range:
-
-```text
-Min .. Max
-```
-
-If `Max` is smaller than `Min`, `ERangeError` is raised.
-
-The complete 32-bit domain is also supported:
-
-```pascal
-RND32(0,High(UInt32))
-```
-
-When the calculated range wraps to zero, `RND32` returns `NextRandom32`
-directly.
-
-## Examples
-
-### Automatic initialization
-
-```pascal
-RANDOMIZE64;
-
-Value:=RANDOM64(100);
-```
-
-`Value` is in the range 0 through 99.
-
-For the 32-bit generator:
-
-```pascal
-RANDOMIZE32;
-
-Value:=RANDOM32(100);
-```
-
-### Inclusive range
-
-```pascal
-RANDOMIZE64;
-
-Die:=RND64(1,6);
-```
-
-For the 32-bit version:
-
-```pascal
-RANDOMIZE32;
-
-Card:=RND32(1,52);
-```
-
-### Repeatable sequence
-
-```pascal
-RANDOMIZE64($123456789ABCDEF0);
-
-FOR I:=1 TO 100 DO
-  Values[I]:=RANDOM64(1000000);
-```
-
-Using the same seed later reproduces the same sequence:
-
-```pascal
-RANDOMIZE64($123456789ABCDEF0);
-```
-
-This makes deterministic random sequences straightforward to reproduce.
-
-### Independent generators
-
-```pascal
-RANDOMIZE32($12345678);
-RANDOMIZE64($123456789ABCDEF0);
-
-A:=RANDOM32(100);
-B:=RANDOM64(100);
-```
-
-The calls do not affect each other's state.
+Both approaches restore the generator to exactly the same position in its
+pseudo-random sequence.
 
 ## Overflow and range checking
 
@@ -482,20 +596,68 @@ for the complete unsigned integer range.
 Enabling overflow or range checking for these calculations would change the
 required semantics and may cause runtime errors.
 
-## Thread safety
+## 32-bit implementation
 
-`RandSeed32` and `RandSeed64` are global mutable variables.
+The 32-bit implementation is the exact functional equivalent of the 64-bit
+implementation described above, but uses `UInt32` values and maintains a
+32-bit generator state.
 
-The generators are therefore **not thread-safe when the same generator is
-used concurrently by multiple threads**.
+It provides both an independent RECORD:
 
-Applications using the generator from multiple threads should either:
+```pascal
+TYPE
+  TPRNG32       = RECORD
+                  PRIVATE
+                    FSeed       : UInt32;
+                    FUNCTION    NextRandom : UInt32;
+                  PUBLIC
+                    CLASS FUNCTION Create : TPRNG32; OVERLOAD; STATIC;
+                    CLASS FUNCTION Create(Seed : UInt32) : TPRNG32; OVERLOAD; STATIC;
+                    FUNCTION    RANDOM(Range : UInt32) : UInt32;
+                    FUNCTION    RND(Min,Max : UInt32) : UInt32;
+                    PROCEDURE   RANDOMIZE; OVERLOAD;
+                    PROCEDURE   RANDOMIZE(Seed : UInt32); OVERLOAD;
+                    PROPERTY    Seed : UInt32 READ FSeed WRITE FSeed;
+                  END;
+```
 
-- serialize access to the global generator state; or
-- maintain independent PRNG state for each thread.
+and the corresponding global interface:
 
-The 32-bit and 64-bit generators use separate state variables, but that does
-not make concurrent access to the same state variable safe.
+```pascal
+VAR
+  RandSeed32 : UInt32 = 0;
+
+PROCEDURE RANDOMIZE32; OVERLOAD;
+PROCEDURE RANDOMIZE32(Seed : UInt32); OVERLOAD;
+FUNCTION RANDOM32(Range : UInt32) : UInt32;
+FUNCTION RND32(Min,Max : UInt32) : UInt32;
+```
+
+The parameters, behaviour, error handling, deterministic seeding,
+save/restore semantics, rejection sampling, inclusive `RND` ranges, RECORD
+state ownership, and thread-safety considerations are identical to the
+64-bit versions described above.
+
+The only differences are:
+
+- `UInt32` is used instead of `UInt64`;
+- the internal state has 32 bits;
+- the full state period is `2^32`;
+- the full-range special case is
+  `RND32(0,High(UInt32))` or
+  `TPRNG32.RND(0,High(UInt32))`;
+- GUID seeding folds the 128-bit GUID into four `UInt32` parts instead of
+  two `UInt64` parts;
+- the 32-bit SplitMix-style generator uses its corresponding 32-bit mixing
+  constants and state increment.
+
+The 32-bit and 64-bit generators are completely independent.
+
+Calling a 32-bit global function changes only `RandSeed32`, while calling a
+64-bit global function changes only `RandSeed64`.
+
+Likewise, every `TPRNG32` and `TPRNG64` RECORD maintains its own independent
+state.
 
 ## Statistical and security considerations
 
@@ -526,22 +688,27 @@ generator instead.
 
 ## Summary
 
-`HeartWare.PRNG` provides a compact pair of unsigned pseudo-random generators
-for Delphi:
+The 64-bit API consists of the following operations:
 
+```text
 ┌───────────────────────┬────────────────────────────────────────────────────┐
 │ Function              │ Result                                             │
 ├───────────────────────┼────────────────────────────────────────────────────┤
-│ RANDOMIZE32           │ Seeds the 32-bit generator from a TGUID            │
-│ RANDOMIZE32(Seed)     │ Sets an explicit 32-bit seed                       │
-│ RANDOM32(Range)       │ Returns 0..Range-1 without modulo bias             │
-│ RND32(Min,Max)        │ Returns inclusive Min..Max                         │
+│ TPRNG64.Create        │ Creates a GUID-seeded independent generator        │
+│ TPRNG64.Create(Seed)  │ Creates an explicitly seeded generator             │
+│ RNG.RANDOMIZE         │ Re-seeds a RECORD instance from a TGUID            │
+│ RNG.RANDOMIZE(Seed)   │ Sets the RECORD instance seed                      │
+│ RNG.RANDOM(Range)     │ Returns 0..Range-1 without modulo bias             │
+│ RNG.RND(Min,Max)      │ Returns inclusive Min..Max                         │
+│ RNG.Seed              │ Reads or writes the complete RECORD state          │
 ├───────────────────────┼────────────────────────────────────────────────────┤
-│ RANDOMIZE64           │ Seeds the 64-bit generator from a TGUID            │
-│ RANDOMIZE64(Seed)     │ Sets an explicit 64-bit seed                       │
+│ RANDOMIZE64           │ Seeds the global generator from a TGUID            │
+│ RANDOMIZE64(Seed)     │ Sets an explicit global seed                       │
 │ RANDOM64(Range)       │ Returns 0..Range-1 without modulo bias             │
 │ RND64(Min,Max)        │ Returns inclusive Min..Max                         │
+│ RandSeed64            │ Reads or writes the complete global state          │
 └───────────────────────┴────────────────────────────────────────────────────┘
+```
 
-The complete generator state is held in `RandSeed32` and `RandSeed64`,
-making deterministic sequences easy to reproduce, save, and restore.
+The 32-bit API provides the same operations with `TPRNG32`, `UInt32`,
+`RandSeed32`, `RANDOMIZE32`, `RANDOM32`, and `RND32`.
