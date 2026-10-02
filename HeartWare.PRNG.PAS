@@ -46,6 +46,8 @@ FUNCTION RND32(Min,Max : UInt32) : UInt32;
 
 IMPLEMENTATION
 
+USES System.SysUtils;
+
 {$Q-,R-} // No Overflow or Range checking - Calculations are supposed to wrap around
 
 FUNCTION PRNG64Next(VAR Seed : UInt64) : UInt64;

@@ -1,6 +1,6 @@
 ﻿Copyright © 2026 HeartWare. All rights reserved.
 
-These UNITs are released under the **HeartWare FreeWare License**.
+This UNIT is released under the **HeartWare FreeWare License**.
 
 You may freely use, copy, modify, and redistribute this software and its
 source code for private, hobby, educational, and other non-commercial
@@ -12,7 +12,8 @@ in any commercial context without prior permission from HeartWare. This
 includes direct or indirect commercial use or distribution, including paid
 download sites, subscription services, commercial software collections,
 magazines, books, paid media, or products or services for which money is
-charged.
+charged. It also includes putting this software or links to it on sites
+that are supported by ads.
 
 If you redistribute a modified or derivative version, it must be released
 under this **exact same license**. You may neither add nor remove
